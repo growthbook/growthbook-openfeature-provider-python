@@ -21,8 +21,8 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-    "openfeature-sdk>=0.4.0",
-    "growthbook @ git+https://github.com/growthbook/growthbook-python.git@feat/multi-context",
+    "openfeature-sdk>=0.7.4",
+    "growthbook @ git+https://github.com/growthbook/growthbook-python.git@feat/multi-context"
 ]
 requires-python = ">=3.8"
 
