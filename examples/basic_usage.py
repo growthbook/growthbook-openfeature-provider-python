@@ -2,12 +2,20 @@ import asyncio
 from openfeature import api
 from growthbook_openfeature_provider import GrowthBookProvider, GrowthBookProviderOptions
 from openfeature.evaluation_context import EvaluationContext
+from growthbook import InMemoryStickyBucketService
+
+def on_experiment_viewed(experiment):
+    print(f"Experiment viewed: {experiment.key}")
 
 async def main():
-    # Configure the provider
+    # Configure the provider with advanced options
     options = GrowthBookProviderOptions(
         api_host="https://cdn.growthbook.io",
-        client_key="sdk-abc123"  # Replace with your client key
+        client_key="sdk-abc123",
+        enabled=True,
+        qa_mode=False,
+        on_experiment_viewed=on_experiment_viewed,
+        sticky_bucket_service=InMemoryStickyBucketService()
     )
     
     # Create and initialize provider

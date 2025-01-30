@@ -1,37 +1,64 @@
-from typing import List, Optional, Union, Dict
-from dataclasses import dataclass
+from typing import List, Optional, Union, Dict, Any, Callable
+from dataclasses import dataclass, field
 
 # OpenFeature imports - based on openfeature-sdk>=0.7.4
 from openfeature.provider.provider import AbstractProvider
+from openfeature.provider import Metadata
+from openfeature.evaluation_context import EvaluationContext
 from openfeature.flag_evaluation import (
     FlagResolutionDetails,
-    EvaluationContext,
-    Metadata,
-    ResolutionDetails,
     Hook,
     Reason,
+    ErrorCode,
 )
 
 # GrowthBook imports from the multi-context branch
 from growthbook.growthbook_client import GrowthBookClient
-from growthbook.common_types import Options, UserContext
+from growthbook.common_types import Options, UserContext, Experiment
+from growthbook import AbstractStickyBucketService
 
 @dataclass
 class GrowthBookProviderOptions:
-    """Configuration options for GrowthBook provider"""
+    """Configuration options for GrowthBook provider.
+    
+    Args:
+        api_host: URL of the GrowthBook API
+        client_key: API key for authentication
+        decryption_key: Optional key for encrypted features
+        cache_ttl: Cache duration in seconds (default: 60)
+        enabled: Whether GrowthBook is enabled (default: True)
+        qa_mode: Enable QA mode for testing (default: False)
+        on_experiment_viewed: Optional callback when experiments are viewed
+        sticky_bucket_service: Optional service for consistent experiment assignments
+    """
     api_host: str
     client_key: str
     decryption_key: str = ""
     cache_ttl: int = 60
+    enabled: bool = True
+    qa_mode: bool = False
+    on_experiment_viewed: Optional[Callable[[Experiment], None]] = None
+    sticky_bucket_service: Optional[AbstractStickyBucketService] = None
 
 class GrowthBookProvider(AbstractProvider):
+    """GrowthBook provider implementation for OpenFeature.
+    
+    Note: While OpenFeature supports optional evaluation context,
+    GrowthBook requires user context for proper targeting. It's recommended
+    to always provide evaluation context with targeting information.
+    """
+    
     def __init__(self, options: GrowthBookProviderOptions):
         """Initialize GrowthBook provider with configuration options"""
         self.gb_options = Options(
             api_host=options.api_host,
             client_key=options.client_key,
             decryption_key=options.decryption_key,
-            cache_ttl=options.cache_ttl
+            cache_ttl=options.cache_ttl,
+            enabled=options.enabled,
+            qa_mode=options.qa_mode,
+            on_experiment_viewed=options.on_experiment_viewed,
+            sticky_bucket_service=options.sticky_bucket_service
         )
         self.client = None
 
@@ -49,7 +76,14 @@ class GrowthBookProvider(AbstractProvider):
         return []
 
     def _create_user_context(self, evaluation_context: Optional[EvaluationContext] = None) -> UserContext:
-        """Convert OpenFeature evaluation context to GrowthBook user context"""
+        """Convert OpenFeature evaluation context to GrowthBook user context.
+        
+        Args:
+            evaluation_context: OpenFeature evaluation context containing targeting information
+            
+        Returns:
+            GrowthBook user context
+        """
         if not evaluation_context:
             return UserContext()
 
@@ -60,19 +94,45 @@ class GrowthBookProvider(AbstractProvider):
         if evaluation_context.targeting_key:
             attributes['id'] = evaluation_context.targeting_key
 
-        return UserContext(
-            attributes=attributes
-        )
+        return UserContext(attributes=attributes)
 
-    def _create_resolution_details(self, flag_key: str, value: any, error_code: str = None) -> ResolutionDetails:
-        """Create resolution details object"""
-        return ResolutionDetails(
+    def _create_flag_resolution(
+        self,
+        value: Any,
+        default_value: Any,
+        error: Optional[Exception] = None,
+        variant: Optional[str] = None,
+    ) -> FlagResolutionDetails:
+        """Create flag resolution details with proper error handling.
+        
+        Args:
+            value: The resolved value
+            default_value: Default value if resolution fails
+            error: Optional exception that occurred during resolution
+            variant: Optional variant name from evaluation
+            
+        Returns:
+            Flag resolution details with appropriate error codes and messages
+        """
+        if not self.client:
+            return FlagResolutionDetails(
+                value=default_value,
+                error_code=ErrorCode.PROVIDER_NOT_READY,
+                reason=Reason.ERROR
+            )
+
+        if error:
+            return FlagResolutionDetails(
+                value=default_value,
+                error_code=ErrorCode.GENERAL,
+                error_message=str(error),
+                reason=Reason.ERROR
+            )
+
+        return FlagResolutionDetails(
             value=value,
-            variant=None,  # GrowthBook doesn't provide variant info in this format
-            reason="TARGETING_MATCH" if not error_code else error_code,
-            error_code=error_code,
-            error_message=None,
-            flag_metadata=None
+            variant=variant,
+            reason=Reason.TARGETING_MATCH
         )
 
     async def resolve_boolean_details(
@@ -91,16 +151,9 @@ class GrowthBookProvider(AbstractProvider):
         try:
             user_context = self._create_user_context(evaluation_context)
             result = await self.client.is_on(flag_key, user_context)
-            return FlagResolutionDetails(
-                value=result,
-                reason="TARGETING_MATCH"
-            )
+            return self._create_flag_resolution(result, default_value)
         except Exception as e:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code="GENERAL",
-                error_message=str(e)
-            )
+            return self._create_flag_resolution(default_value, default_value, error=e)
 
     async def resolve_string_details(
         self,
