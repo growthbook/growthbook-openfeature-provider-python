@@ -4,14 +4,14 @@ from growthbook_openfeature_provider import GrowthBookProvider, GrowthBookProvid
 from openfeature.evaluation_context import EvaluationContext
 from growthbook import InMemoryStickyBucketService
 
-def on_experiment_viewed(experiment):
+async def on_experiment_viewed(experiment):
     print(f"Experiment viewed: {experiment.key}")
 
 async def main():
     # Configure the provider with advanced options
     options = GrowthBookProviderOptions(
         api_host="https://cdn.growthbook.io",
-        client_key="sdk-abc123",
+        client_key="sdk-abc123",  # Replace with a valid client key
         enabled=True,
         qa_mode=False,
         on_experiment_viewed=on_experiment_viewed,
@@ -37,16 +37,19 @@ async def main():
         }
     )
     
-    # Example usage of different flag types
-    boolean_flag = await client.get_boolean_value("show-feature", False, context)
-    string_flag = await client.get_string_value("button-color", "blue", context)
-    number_flag = await client.get_number_value("price", 100, context)
-    object_flag = await client.get_object_value("config", {"default": True}, context)
-    
-    print(f"Boolean flag value: {boolean_flag}")
-    print(f"String flag value: {string_flag}")
-    print(f"Number flag value: {number_flag}")
-    print(f"Object flag value: {object_flag}")
+    try:
+        # Example usage of different flag types
+        boolean_result = client.get_boolean_details("show-feature", False, context)
+        string_result = client.get_string_details("button-color", "blue", context)
+        number_result = client.get_integer_details("price", 100, context)
+        object_result = client.get_object_details("config", {"default": True}, context)
+        
+        print(f"Boolean flag value: {boolean_result.value}")
+        print(f"String flag value: {string_result.value}")
+        print(f"Number flag value: {number_result.value}")
+        print(f"Object flag value: {object_result.value}")
+    except Exception as e:
+        print(f"Error evaluating flags: {e}")
 
 if __name__ == "__main__":
     asyncio.run(main())
