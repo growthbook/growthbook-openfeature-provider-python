@@ -106,7 +106,7 @@ class GrowthBookProvider(AbstractProvider):
         
         # Set on_experiment_viewed separately if it exists
         if provider_options.on_experiment_viewed is not None:
-            self.gb_options.on_experiment_viewed = provider_options.on_experiment_viewed
+            setattr(self.gb_options, 'on_experiment_viewed', provider_options.on_experiment_viewed)  # type: ignore
         
         self.client = None
         self.initialized = False
