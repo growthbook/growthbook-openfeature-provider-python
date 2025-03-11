@@ -22,7 +22,8 @@ classifiers = [
 ]
 dependencies = [
     "openfeature-sdk>=0.7.4",
-    "growthbook @ git+https://github.com/growthbook/growthbook-python.git@feat/multi-context"
+    # "growthbook @ git+https://github.com/growthbook/growthbook-python.git@feat/multi-context"
+    "growthbook>=1.2.1"
 ]
 requires-python = ">=3.8"
 
@@ -54,6 +55,7 @@ multi_line_output = 3
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 addopts = "-ra -q -v"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
