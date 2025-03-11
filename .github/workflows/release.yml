@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_bump:
+        description: 'Type of version bump'
+        required: true
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      release_notes:
+        description: 'Additional release notes'
+        required: false
+        type: string
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write  # For PyPI trusted publishing
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for changelog generation
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.8'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine setuptools wheel
+          pip install python-semantic-release
+
+      - name: Configure Git
+        run: |
+          git config --global user.name "GitHub Actions"
+          git config --global user.email "actions@github.com"
+
+      - name: Update semantic-release configuration
+        run: |
+          # Update the semantic-release configuration in pyproject.toml
+          cat >> pyproject.toml << EOF
+
+          # Update semantic-release configuration
+          [tool.semantic_release]
+          version_variable = ["pyproject.toml:version"]
+          branch = "main"
+          changelog_file = "CHANGELOG.md"
+          build_command = "python -m build"
+          dist_path = "dist/"
+          upload_to_pypi = true
+          upload_to_release = true
+          EOF
+
+      - name: Prepare custom release notes
+        if: ${{ github.event.inputs.release_notes != '' }}
+        run: |
+          # Create a temporary file with custom release notes
+          echo "${{ github.event.inputs.release_notes }}" > release_notes.md
+
+      - name: Run semantic-release
+        id: semantic_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
+        run: |
+          # Set the version bump based on input
+          BUMP_RULE="${{ github.event.inputs.version_bump }}"
+          
+          # Run semantic-release with the specified bump rule
+          if [ -n "${{ github.event.inputs.release_notes }}" ]; then
+            # Use custom release notes
+            semantic-release version --$BUMP_RULE --release-notes-file release_notes.md
+          else
+            # Use automatic changelog generation
+            semantic-release version --$BUMP_RULE
+          fi
+          
+          # Get the new version for output
+          NEW_VERSION=$(grep -oP 'version = "\K[^"]+' pyproject.toml)
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Output Release Information
+        run: |
+          echo "Released version ${{ steps.semantic_release.outputs.new_version }}"
+          echo "Check the GitHub release page for details" 
