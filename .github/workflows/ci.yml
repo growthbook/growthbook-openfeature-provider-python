@@ -15,18 +15,31 @@ jobs:
 
     steps:
     - uses: actions/checkout@v3
+    
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v4
       with:
         python-version: ${{ matrix.python-version }}
+    
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         pip install -e ".[dev]"
+    
+    - name: Static type checking
+      run: |
+        mypy src tests
+    
     - name: Run tests
       run: |
-        pytest --cov=growthbook_openfeature_provider
-    - name: Check formatting
+        pytest --cov=src tests/
+    
+    - name: Check package build
       run: |
-        black . --check
-        isort . --check 
+        pip install build
+        python -m build
+        pip install dist/*.whl
+        
+    - name: Verify import works
+      run: |
+        python -c "from growthbook_openfeature_provider import GrowthBookProvider; print('Import successful')" 
