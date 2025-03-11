@@ -133,3 +133,23 @@ def test_provider_not_ready():
     )
     assert result.value is False
     assert result.error_code == ErrorCode.PROVIDER_NOT_READY
+
+def test_context_mapping():
+    provider = GrowthBookProvider(GrowthBookProviderOptions(
+        api_host="https://cdn.growthbook.io",
+        client_key="test-key"
+    ))
+    
+    # Create an OpenFeature context
+    of_context = EvaluationContext(
+        targeting_key="user-123",
+        attributes={"country": "US", "premium": True}
+    )
+    
+    # Convert to GrowthBook context
+    gb_context = provider._create_user_context(of_context)
+    
+    # Verify mapping
+    assert gb_context.attributes.get("id") == "user-123"
+    assert gb_context.attributes.get("country") == "US"
+    assert gb_context.attributes.get("premium") is True
