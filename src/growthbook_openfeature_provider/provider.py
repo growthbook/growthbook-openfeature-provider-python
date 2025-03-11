@@ -41,31 +41,54 @@ class GrowthBookProviderOptions:
     sticky_bucket_service: Optional[AbstractStickyBucketService] = None
 
 def run_async(coro):
-    """Helper function to run async code in sync context"""
+    """Helper function to run async code in sync context with error handling"""
     try:
-        # Try to get the current event loop
         loop = asyncio.get_event_loop()
+        if loop.is_running():
+            return asyncio.run_coroutine_threadsafe(coro, loop).result()
+        else:
+            return loop.run_until_complete(coro)
     except RuntimeError:
         # Create a new event loop if needed
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    
-    # Run the coroutine to completion
-    if loop.is_running():
-        # If the loop is already running, create a future and run the coroutine
-        # in the background, then wait for the result
-        future = asyncio.run_coroutine_threadsafe(coro, loop)
-        return future.result()
-    else:
-        # If the loop is not running, just run the coroutine to completion
-        return loop.run_until_complete(coro)
+        try:
+            return loop.run_until_complete(coro)
+        finally:
+            loop.close()
+    except Exception as e:
+        raise RuntimeError(f"Failed to execute async code: {str(e)}") from e
 
 class GrowthBookProvider(AbstractProvider):
     """GrowthBook provider implementation for OpenFeature.
     
+    This provider integrates GrowthBook feature flags with the OpenFeature SDK.
+
     Note: While OpenFeature supports optional evaluation context,
     GrowthBook requires user context for proper targeting. It's recommended
     to always provide evaluation context with targeting information.
+    
+    Example usage:
+    ```python
+    from openfeature.api import OpenFeatureAPI
+    from growthbook_openfeature_provider import GrowthBookProvider, GrowthBookProviderOptions
+    
+    # Create and initialize the provider
+    provider = GrowthBookProvider(GrowthBookProviderOptions(
+        api_host="https://cdn.growthbook.io",
+        client_key="sdk-abc123"
+    ))
+    
+    # Initialize the provider (async)
+    await provider.initialize()
+    
+    # Register with OpenFeature
+    OpenFeatureAPI.set_provider(provider)
+    
+    # Use OpenFeature client to evaluate flags
+    client = OpenFeatureAPI.get_client()
+    value = client.get_boolean_value("my-flag", False)
+    ```
     """
     
     def __init__(self, provider_options: GrowthBookProviderOptions):
@@ -92,6 +115,10 @@ class GrowthBookProvider(AbstractProvider):
         """Initialize the GrowthBook client"""
         self.client = GrowthBookClient(options=self.gb_options)
         self.initialized = await self.client.initialize()
+
+    def initialize_sync(self):
+        """Synchronous initialization for non-async contexts"""
+        return run_async(self.initialize())
 
     def get_metadata(self) -> Metadata:
         """Return provider metadata"""
@@ -175,11 +202,20 @@ class GrowthBookProvider(AbstractProvider):
             if feature_result is None:
                 return FlagResolutionDetails(
                     value=default_value,
-                    reason=Reason.DEFAULT
+                    reason=Reason.DEFAULT,
+                    error_code=None  # Ensure no error code is set for default values
                 )
             
-            # Get the value (or default if None)
-            value = value_converter(feature_result.value) if feature_result.value is not None else default_value
+            # Add type safety for value conversion to prevent runtime errors
+            try:
+                value = value_converter(feature_result.value) if feature_result.value is not None else default_value
+            except (ValueError, TypeError) as e:
+                return FlagResolutionDetails(
+                    value=default_value,
+                    error_code=ErrorCode.TYPE_MISMATCH,
+                    error_message=f"Failed to convert value: {str(e)}",
+                    reason=Reason.ERROR
+                )
             
             # Determine the reason based on the result
             reason = Reason.DEFAULT
