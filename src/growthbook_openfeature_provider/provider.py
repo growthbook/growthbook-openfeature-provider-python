@@ -43,11 +43,22 @@ class GrowthBookProviderOptions:
 def run_async(coro):
     """Helper function to run async code in sync context"""
     try:
+        # Try to get the current event loop
         loop = asyncio.get_event_loop()
     except RuntimeError:
+        # Create a new event loop if needed
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-    return loop.run_until_complete(coro)
+    
+    # Run the coroutine to completion
+    if loop.is_running():
+        # If the loop is already running, create a future and run the coroutine
+        # in the background, then wait for the result
+        future = asyncio.run_coroutine_threadsafe(coro, loop)
+        return future.result()
+    else:
+        # If the loop is not running, just run the coroutine to completion
+        return loop.run_until_complete(coro)
 
 class GrowthBookProvider(AbstractProvider):
     """GrowthBook provider implementation for OpenFeature.
@@ -59,6 +70,7 @@ class GrowthBookProvider(AbstractProvider):
     
     def __init__(self, provider_options: GrowthBookProviderOptions):
         """Initialize GrowthBook provider with configuration options"""
+        # Create options without the on_experiment_viewed parameter
         self.gb_options = Options(
             api_host=provider_options.api_host,
             client_key=provider_options.client_key,
@@ -66,9 +78,13 @@ class GrowthBookProvider(AbstractProvider):
             cache_ttl=provider_options.cache_ttl,
             enabled=provider_options.enabled,
             qa_mode=provider_options.qa_mode,
-            # on_experiment_viewed=provider_options.on_experiment_viewed,
             sticky_bucket_service=provider_options.sticky_bucket_service
         )
+        
+        # Set on_experiment_viewed separately if it exists
+        if provider_options.on_experiment_viewed is not None:
+            self.gb_options.on_experiment_viewed = provider_options.on_experiment_viewed
+        
         self.client = None
         self.initialized = False
 
@@ -101,57 +117,30 @@ class GrowthBookProvider(AbstractProvider):
         if evaluation_context.attributes:
             attributes = dict(evaluation_context.attributes)
         
+        # Use targeting_key as id if provided
         if evaluation_context.targeting_key:
             attributes['id'] = evaluation_context.targeting_key
 
         return UserContext(attributes=attributes)
 
-    def _create_flag_resolution(
-        self,
-        value: Any,
-        default_value: Any,
-        error: Optional[Exception] = None,
-        variant: Optional[str] = None,
-    ) -> FlagResolutionDetails:
-        """Create flag resolution details with proper error handling.
-        
-        Args:
-            value: The resolved value
-            default_value: Default value if resolution fails
-            error: Optional exception that occurred during resolution
-            variant: Optional variant name from evaluation
-            
-        Returns:
-            Flag resolution details with appropriate error codes and messages
-        """
-        if not self.client or not self.initialized:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.PROVIDER_NOT_READY,
-                reason=Reason.ERROR
-            )
-
-        if error:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.GENERAL,
-                error_message=str(error),
-                reason=Reason.ERROR
-            )
-
-        return FlagResolutionDetails(
-            value=value,
-            variant=variant,
-            reason=Reason.TARGETING_MATCH
-        )
-
-    def resolve_boolean_details(
+    def _process_flag_evaluation(
         self,
         flag_key: str,
-        default_value: bool,
+        default_value: Any,
         evaluation_context: Optional[EvaluationContext] = None,
-    ) -> FlagResolutionDetails[bool]:
-        """Resolve boolean feature flags"""
+        value_converter: Callable[[Any], Any] = lambda x: x
+    ) -> FlagResolutionDetails:
+        """Process flag evaluation with common logic for all flag types.
+        
+        Args:
+            flag_key: The feature flag key to evaluate
+            default_value: Default value if flag is not found or evaluation fails
+            evaluation_context: Optional context for evaluation
+            value_converter: Function to convert the result value to the appropriate type
+            
+        Returns:
+            Flag resolution details with the evaluated value and metadata
+        """
         if not self.client or not self.initialized:
             return FlagResolutionDetails(
                 value=default_value,
@@ -163,23 +152,52 @@ class GrowthBookProvider(AbstractProvider):
             # Convert OpenFeature context to GrowthBook context
             user_context = self._create_user_context(evaluation_context)
             
-            # Get feature result from GrowthBook
-            feature_result = run_async(self.client.eval_feature(flag_key, user_context))
+            # For targeting to work, we need an id
+            if not user_context.attributes.get('id') and evaluation_context and evaluation_context.targeting_key:
+                return FlagResolutionDetails(
+                    value=default_value,
+                    error_code=ErrorCode.TARGETING_KEY_MISSING,
+                    reason=Reason.ERROR
+                )
             
-            # If feature not found, return default
-            if not feature_result:
+            # Get the feature directly from the client's features
+            if hasattr(self.client, 'features') and flag_key in self.client.features:
+                feature = self.client.features[flag_key]
+                return FlagResolutionDetails(
+                    value=value_converter(feature.defaultValue),
+                    reason=Reason.DEFAULT
+                )
+            
+            # If we can't get the feature directly, try eval_feature
+            feature_result = run_async(self.client.eval_feature(flag_key, user_context))
+                
+            # Handle feature not found
+            if feature_result is None:
                 return FlagResolutionDetails(
                     value=default_value,
                     reason=Reason.DEFAULT
                 )
             
-            # Map GrowthBook result to OpenFeature result
+            # Get the value (or default if None)
+            value = value_converter(feature_result.value) if feature_result.value is not None else default_value
+            
+            # Determine the reason based on the result
+            reason = Reason.DEFAULT
+            variant = None
+            
+            # Check if from targeting rule
+            if hasattr(feature_result, 'ruleId') and feature_result.ruleId:
+                reason = Reason.TARGETING_MATCH
+                variant = feature_result.ruleId
+            # Check if this is from an experiment
+            elif hasattr(feature_result, 'experimentResult') and feature_result.experimentResult:
+                reason = Reason.SPLIT
+                variant = str(feature_result.experimentResult.variationId)
+            
             return FlagResolutionDetails(
-                value=bool(feature_result.value if feature_result.value is not None else default_value),
-                variant=feature_result.source.value_type if feature_result.source else None,
-                reason=Reason.SPLIT if feature_result.source and feature_result.source.experiment else
-                      Reason.TARGETING_MATCH if feature_result.source else
-                      Reason.DEFAULT
+                value=value,
+                variant=variant,
+                reason=reason
             )
         except Exception as e:
             return FlagResolutionDetails(
@@ -188,6 +206,20 @@ class GrowthBookProvider(AbstractProvider):
                 error_message=str(e),
                 reason=Reason.ERROR
             )
+
+    def resolve_boolean_details(
+        self,
+        flag_key: str,
+        default_value: bool,
+        evaluation_context: Optional[EvaluationContext] = None,
+    ) -> FlagResolutionDetails[bool]:
+        """Resolve boolean feature flags"""
+        return self._process_flag_evaluation(
+            flag_key=flag_key,
+            default_value=default_value,
+            evaluation_context=evaluation_context,
+            value_converter=bool
+        )
 
     def resolve_string_details(
         self,
@@ -196,27 +228,12 @@ class GrowthBookProvider(AbstractProvider):
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[str]:
         """Resolve string feature flags"""
-        if not self.client or not self.initialized:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.PROVIDER_NOT_READY,
-                reason=Reason.ERROR
-            )
-
-        try:
-            user_context = self._create_user_context(evaluation_context)
-            result = run_async(self.client.get_feature_value(flag_key, default_value, user_context))
-            return FlagResolutionDetails(
-                value=str(result),
-                reason=Reason.TARGETING_MATCH
-            )
-        except Exception as e:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.GENERAL,
-                error_message=str(e),
-                reason=Reason.ERROR
-            )
+        return self._process_flag_evaluation(
+            flag_key=flag_key,
+            default_value=default_value,
+            evaluation_context=evaluation_context,
+            value_converter=str
+        )
 
     def resolve_integer_details(
         self,
@@ -225,27 +242,12 @@ class GrowthBookProvider(AbstractProvider):
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[int]:
         """Resolve integer feature flags"""
-        if not self.client or not self.initialized:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.PROVIDER_NOT_READY,
-                reason=Reason.ERROR
-            )
-
-        try:
-            user_context = self._create_user_context(evaluation_context)
-            result = run_async(self.client.get_feature_value(flag_key, default_value, user_context))
-            return FlagResolutionDetails(
-                value=int(result),
-                reason=Reason.TARGETING_MATCH
-            )
-        except Exception as e:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.GENERAL,
-                error_message=str(e),
-                reason=Reason.ERROR
-            )
+        return self._process_flag_evaluation(
+            flag_key=flag_key,
+            default_value=default_value,
+            evaluation_context=evaluation_context,
+            value_converter=int
+        )
 
     def resolve_float_details(
         self,
@@ -254,27 +256,12 @@ class GrowthBookProvider(AbstractProvider):
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[float]:
         """Resolve float feature flags"""
-        if not self.client or not self.initialized:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.PROVIDER_NOT_READY,
-                reason=Reason.ERROR
-            )
-
-        try:
-            user_context = self._create_user_context(evaluation_context)
-            result = run_async(self.client.get_feature_value(flag_key, default_value, user_context))
-            return FlagResolutionDetails(
-                value=float(result),
-                reason=Reason.TARGETING_MATCH
-            )
-        except Exception as e:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.GENERAL,
-                error_message=str(e),
-                reason=Reason.ERROR
-            )
+        return self._process_flag_evaluation(
+            flag_key=flag_key,
+            default_value=default_value,
+            evaluation_context=evaluation_context,
+            value_converter=float
+        )
 
     def resolve_object_details(
         self,
@@ -283,24 +270,15 @@ class GrowthBookProvider(AbstractProvider):
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[Union[dict, list]]:
         """Resolve object feature flags"""
-        if not self.client or not self.initialized:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.PROVIDER_NOT_READY,
-                reason=Reason.ERROR
-            )
+        return self._process_flag_evaluation(
+            flag_key=flag_key,
+            default_value=default_value,
+            evaluation_context=evaluation_context
+        )
 
-        try:
-            user_context = self._create_user_context(evaluation_context)
-            result = run_async(self.client.get_feature_value(flag_key, default_value, user_context))
-            return FlagResolutionDetails(
-                value=result,
-                reason=Reason.TARGETING_MATCH
-            )
-        except Exception as e:
-            return FlagResolutionDetails(
-                value=default_value,
-                error_code=ErrorCode.GENERAL,
-                error_message=str(e),
-                reason=Reason.ERROR
-            ) 
+    async def close(self):
+        """Clean up resources when provider is no longer needed"""
+        if self.client:
+            await self.client.close()
+            self.client = None
+            self.initialized = False 
