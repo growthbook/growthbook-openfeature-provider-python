@@ -66,6 +66,4 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
 ]
-
-[tool.semantic_release]
-version_variable = ["pyproject.toml:version"] 
+ 
