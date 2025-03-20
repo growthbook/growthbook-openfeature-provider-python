@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "growthbook-openfeature-provider"
-version = "0.0.1"
+dynamic = ["version"]
 description = "GrowthBook provider for OpenFeature"
 readme = "README.md"
 authors = [{ name = "GrowthBook Maintainers", email = "hello@growthbook.io" }]
@@ -68,9 +68,14 @@ markers = [
 ]
 
 [tool.semantic_release]
-version_variable = ["pyproject.toml:project.version"]
+version_variable = [
+    "src/growthbook_openfeature_provider/__init__.py:__version__"
+]
 branch = "main"
 changelog_file = "CHANGELOG.md"
 build_command = "pip install build && python -m build"
 dist_path = "dist/"
+
+[tool.hatch.version]
+path = "src/growthbook_openfeature_provider/__init__.py"
  
