@@ -68,7 +68,7 @@ markers = [
 ]
 
 [tool.semantic_release]
-version_variable = ["pyproject.toml:project.version:nf"]
+version_variable = ["pyproject.toml:project.version"]
 branch = "main"
 changelog_file = "CHANGELOG.md"
 build_command = "pip install build && python -m build"
