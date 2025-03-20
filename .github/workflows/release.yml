@@ -26,7 +26,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for changelog generation
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -49,6 +49,7 @@ jobs:
           git_committer_name: "github-actions"
           git_committer_email: "actions@users.noreply.github.com"
           force: ${{ github.event.inputs.version_bump }}
+          build: true
 
       - name: Publish to PyPI
         if: steps.release.outputs.released == 'true'

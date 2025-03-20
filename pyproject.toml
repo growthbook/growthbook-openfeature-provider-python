@@ -66,4 +66,11 @@ filterwarnings = [
 markers = [
     "asyncio: mark test as async",
 ]
+
+[tool.semantic_release]
+version_variable = ["pyproject.toml:version"]
+branch = "main"
+changelog_file = "CHANGELOG.md"
+build_command = "python -m build"
+dist_path = "dist/"
  
