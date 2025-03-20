@@ -74,16 +74,27 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PYPI_TOKEN: ${{ secrets.PYPI_API_TOKEN }}
         run: |
-          # Set the version bump based on input
-          BUMP_RULE="${{ github.event.inputs.version_bump }}"
+          # Map the input to the correct semantic-release option
+          if [ "${{ github.event.inputs.version_bump }}" == "patch" ]; then
+            BUMP_PART="patch"
+          elif [ "${{ github.event.inputs.version_bump }}" == "minor" ]; then
+            BUMP_PART="minor"
+          elif [ "${{ github.event.inputs.version_bump }}" == "major" ]; then
+            BUMP_PART="major"
+          else
+            BUMP_PART="patch"  # Default to patch
+          fi
           
-          # Run semantic-release with the specified bump rule and force flag
+          # Add the force version bump to the pyproject.toml
+          sed -i "/\[tool.semantic_release\]/a force_version_bump = \"$BUMP_PART\"" pyproject.toml
+          
+          # Run semantic-release publish
           if [ -n "${{ github.event.inputs.release_notes }}" ]; then
             # Use custom release notes
-            semantic-release publish --$BUMP_RULE --force-level $BUMP_RULE --release-notes-file release_notes.md
+            semantic-release publish --release-notes-file release_notes.md
           else
             # Use automatic changelog generation
-            semantic-release publish --$BUMP_RULE --force-level $BUMP_RULE
+            semantic-release publish
           fi
           
           # Get the new version for output
