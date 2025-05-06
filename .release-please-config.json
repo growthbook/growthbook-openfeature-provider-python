@@ -1,0 +1,23 @@
+{
+    "packages": {
+        "src/growthbook_openfeature_provider": {
+            "release-type": "python",
+            "package-name": "growthbook-openfeature-provider",
+            "include-v-in-tag": false,
+            "include-component-in-tag": false,
+            "bump-minor-pre-major": true,
+            "bump-patch-for-minor-pre-major": true,
+            "versioning": "default",
+            "changelog-path": "CHANGELOG.md",
+            "version-file": "src/growthbook_openfeature_provider/__init__.py",
+            "extra-files": [
+                "CHANGELOG.md",
+                "src/growthbook_openfeature_provider/__init__.py"
+            ]
+        }
+    },
+    "plugins": [
+        "node-workspace"
+    ],
+    "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json"
+}
