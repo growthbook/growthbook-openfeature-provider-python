@@ -1,6 +1,6 @@
 {
     "packages": {
-        "src/growthbook_openfeature_provider": {
+        ".": {
             "release-type": "python",
             "package-name": "growthbook-openfeature-provider",
             "include-v-in-tag": false,
