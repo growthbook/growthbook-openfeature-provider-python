@@ -26,10 +26,10 @@ async def test_run_async_in_async_context():
 def test_run_async_with_error():
     """Test run_async when the coroutine raises an error."""
     async def test_coro():
-        raise ValueError("test error")
+        raise ValueError("test error.")
     
     # Should propagate the error
-    with pytest.raises(ValueError, match="test error"):
+    with pytest.raises(ValueError, match="test error."):
         run_async(test_coro())
 
 @pytest.mark.asyncio
