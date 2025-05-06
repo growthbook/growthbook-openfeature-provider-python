@@ -9,6 +9,7 @@ from growthbook_openfeature_provider import GrowthBookProvider, GrowthBookProvid
 from growthbook_openfeature_provider.provider import run_async
 from growthbook.common_types import UserContext
 from dataclasses import dataclass
+from typing import Any, Optional
 
 # Configure logging
 logging.basicConfig(level=logging.DEBUG)
@@ -17,9 +18,9 @@ logger = logging.getLogger(__name__)
 @dataclass
 class MockFeatureResult:
     """Mock feature result from GrowthBook"""
-    value: any
-    ruleId: str = None
-    experimentResult: any = None
+    value: Any
+    ruleId: Optional[str] = None
+    experimentResult: Any = None
 
 @pytest.fixture
 async def mock_features():
