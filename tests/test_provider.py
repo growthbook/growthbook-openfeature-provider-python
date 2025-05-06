@@ -90,7 +90,7 @@ def test_provider_async_evaluation():
         
         # Test flag evaluation - should return default value
         bool_flag = client.get_boolean_value("test-flag", False)
-        logger.info(f"Test flag value: {bool_flag}")
+        logger.info(f"Test flag value-: {bool_flag}")
         
         # Verify we got a result (should be the default value)
         assert bool_flag is False, "Expected default value (False) when features cannot be fetched"
