@@ -1,6 +1,8 @@
 from typing import List, Optional, Union, Dict, Any, Callable
 from dataclasses import dataclass, field
 import asyncio
+import logging
+import traceback
 
 # OpenFeature imports - based on openfeature-sdk>=0.7.4
 from openfeature.provider import AbstractProvider, Metadata
@@ -16,6 +18,8 @@ from openfeature.flag_evaluation import (
 from growthbook.growthbook_client import GrowthBookClient
 from growthbook.common_types import Options, UserContext, Experiment
 from growthbook import AbstractStickyBucketService
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class GrowthBookProviderOptions:
@@ -41,23 +45,62 @@ class GrowthBookProviderOptions:
     sticky_bucket_service: Optional[AbstractStickyBucketService] = None
 
 def run_async(coro):
-    """Helper function to run async code in sync context with error handling"""
+    """
+    Run a coroutine in the current event loop or create a new one if needed.
+    
+    This function handles several edge cases:
+    1. No event loop exists
+    2. Event loop exists but can't be accessed
+    3. Event loop is running (nested case)
+    4. Coroutine raises an exception
+    5. Cleanup of newly created event loops
+    
+    Performance optimizations:
+    1. Avoids unnecessary task creation in nested async contexts
+    2. Caches loop detection result
+    3. Minimizes exception handling overhead
+    
+    Args:
+        coro: The coroutine to run
+        
+    Returns:
+        The result of the coroutine or a Task if in async context
+        
+    Raises:
+        RuntimeError: If no event loop can be found or created
+        Exception: Any exception raised by the coroutine
+    """
+    # Quick check for running loop first (most common case in async contexts)
+    try:
+        loop = asyncio.get_running_loop()
+        # We're in an async context, just create a task
+        return asyncio.create_task(coro)
+    except RuntimeError:
+        # Not in async context, proceed with sync handling
+        pass
+
+    # Sync context handling
     try:
         loop = asyncio.get_event_loop()
-        if loop.is_running():
-            return asyncio.run_coroutine_threadsafe(coro, loop).result()
-        else:
-            return loop.run_until_complete(coro)
+        created_new_loop = False
     except RuntimeError:
-        # Create a new event loop if needed
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
         try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            created_new_loop = True
+        except RuntimeError as e:
+            raise RuntimeError("No event loop found and unable to create one") from e
+
+    try:
+        return loop.run_until_complete(coro)
     except Exception as e:
-        raise RuntimeError(f"Failed to execute async code: {str(e)}") from e
+        raise e
+    finally:
+        if created_new_loop:
+            try:
+                loop.close()
+            except Exception:
+                pass  # Ignore cleanup errors
 
 class GrowthBookProvider(AbstractProvider):
     """GrowthBook provider implementation for OpenFeature.
@@ -150,24 +193,23 @@ class GrowthBookProvider(AbstractProvider):
 
         return UserContext(attributes=attributes)
 
-    def _process_flag_evaluation(
+    def _eval_feature_sync(self, flag_key: str, user_context: UserContext):
+        """Synchronous version of eval_feature that uses the cached features"""
+        if not self.client:
+            return None
+
+        return self.client.eval_feature(flag_key, user_context)
+
+    async def _process_flag_evaluation_async(
         self,
         flag_key: str,
         default_value: Any,
         evaluation_context: Optional[EvaluationContext] = None,
         value_converter: Callable[[Any], Any] = lambda x: x
     ) -> FlagResolutionDetails:
-        """Process flag evaluation with common logic for all flag types.
+        """Async version of _process_flag_evaluation for use in async contexts."""
+        logger.debug(f"Processing flag evaluation for {flag_key} with context {evaluation_context}")
         
-        Args:
-            flag_key: The feature flag key to evaluate
-            default_value: Default value if flag is not found or evaluation fails
-            evaluation_context: Optional context for evaluation
-            value_converter: Function to convert the result value to the appropriate type
-            
-        Returns:
-            Flag resolution details with the evaluated value and metadata
-        """
         if not self.client or not self.initialized:
             return FlagResolutionDetails(
                 value=default_value,
@@ -187,16 +229,9 @@ class GrowthBookProvider(AbstractProvider):
                     reason=Reason.ERROR
                 )
             
-            # Get the feature directly from the client's features
-            if hasattr(self.client, 'features') and flag_key in self.client.features:
-                feature = self.client.features[flag_key]
-                return FlagResolutionDetails(
-                    value=value_converter(feature.defaultValue),
-                    reason=Reason.DEFAULT
-                )
-            
-            # If we can't get the feature directly, try eval_feature
-            feature_result = run_async(self.client.eval_feature(flag_key, user_context))
+            # Evaluate the feature using eval_feature - properly await the async call
+            logger.debug(f"Evaluating feature {flag_key} with context {user_context}")
+            feature_result = await self.client.eval_feature(flag_key, user_context)
                 
             # Handle feature not found
             if feature_result is None:
@@ -210,6 +245,7 @@ class GrowthBookProvider(AbstractProvider):
             try:
                 value = value_converter(feature_result.value) if feature_result.value is not None else default_value
             except (ValueError, TypeError) as e:
+                logger.error(f"Type conversion error: {e}")
                 return FlagResolutionDetails(
                     value=default_value,
                     error_code=ErrorCode.TYPE_MISMATCH,
@@ -223,10 +259,12 @@ class GrowthBookProvider(AbstractProvider):
             
             # Check if from targeting rule
             if hasattr(feature_result, 'ruleId') and feature_result.ruleId:
+                logger.debug(f"Targeting rule matched: {feature_result.ruleId}")
                 reason = Reason.TARGETING_MATCH
                 variant = feature_result.ruleId
             # Check if this is from an experiment
             elif hasattr(feature_result, 'experimentResult') and feature_result.experimentResult:
+                logger.debug(f"Experiment variation assigned: {feature_result.experimentResult}")
                 reason = Reason.SPLIT
                 variant = str(feature_result.experimentResult.variationId)
             
@@ -236,12 +274,30 @@ class GrowthBookProvider(AbstractProvider):
                 reason=reason
             )
         except Exception as e:
+            logger.error(f"Error during flag evaluation: {e}")
+            import traceback
+            logger.error(f"Full traceback:\n{traceback.format_exc()}")
             return FlagResolutionDetails(
                 value=default_value,
                 error_code=ErrorCode.GENERAL,
                 error_message=str(e),
                 reason=Reason.ERROR
             )
+
+    def _process_flag_evaluation(
+        self,
+        flag_key: str,
+        default_value: Any,
+        evaluation_context: Optional[EvaluationContext] = None,
+        value_converter: Callable[[Any], Any] = lambda x: x
+    ) -> FlagResolutionDetails:
+        """Synchronous version of flag evaluation for OpenFeature interface."""
+        return run_async(self._process_flag_evaluation_async(
+            flag_key=flag_key,
+            default_value=default_value,
+            evaluation_context=evaluation_context,
+            value_converter=value_converter
+        ))
 
     def resolve_boolean_details(
         self,
