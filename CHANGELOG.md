@@ -1,6 +1,13 @@
 # CHANGELOG
 
 
+## [0.0.4](https://github.com/growthbook/growthbook-openfeature-provider-python/compare/0.0.3...0.0.4) (2025-05-06)
+
+
+### Bug Fixes
+
+* handle async contexts ([d3b7027](https://github.com/growthbook/growthbook-openfeature-provider-python/commit/d3b70273ba925fc319db2bce234c14d22ab06eb1))
+
 ## [0.0.3](https://github.com/growthbook/growthbook-openfeature-provider-python/compare/v0.0.2...0.0.3) (2025-05-06)
 
 
