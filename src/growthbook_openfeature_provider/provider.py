@@ -259,7 +259,7 @@ class GrowthBookProvider(AbstractProvider):
             
             # Check if from targeting rule
             if hasattr(feature_result, 'ruleId') and feature_result.ruleId:
-                logger.debug(f"Targeting rule matched: {feature_result.ruleId}")
+                logger.debug(f"Targeting rule matched-: {feature_result.ruleId}")
                 reason = Reason.TARGETING_MATCH
                 variant = feature_result.ruleId
             # Check if this is from an experiment
