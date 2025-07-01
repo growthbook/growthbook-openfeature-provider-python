@@ -1,6 +1,7 @@
 from typing import List, Optional, Union, Dict, Any, Callable
 from dataclasses import dataclass, field
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import logging
 import traceback
 
@@ -64,7 +65,7 @@ def run_async(coro):
         coro: The coroutine to run
         
     Returns:
-        The result of the coroutine or a Task if in async context
+        The result of the coroutine
         
     Raises:
         RuntimeError: If no event loop can be found or created
@@ -73,8 +74,15 @@ def run_async(coro):
     # Quick check for running loop first (most common case in async contexts)
     try:
         loop = asyncio.get_running_loop()
-        # We're in an async context, just create a task
-        return asyncio.create_task(coro)
+
+        # We're in an async context - run in separate thread
+        def run_in_thread():
+            return asyncio.run(coro)
+        
+        # Execute in thread pool
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_thread)
+            return future.result() # blocks until the result is ready - Fix to support backwards compatibility.
     except RuntimeError:
         # Not in async context, proceed with sync handling
         pass
