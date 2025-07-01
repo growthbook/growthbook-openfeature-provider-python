@@ -97,7 +97,7 @@ def test_provider_async_evaluation():
         
     finally:
         # Clean up
-        provider.close()
+        run_async(provider.close())
 
 def test_provider_with_real_api():
     """Test the provider with a real GrowthBook API connection."""
