@@ -626,19 +626,14 @@ def test_run_async_legacy_in_sync_context():
     assert result == "test_result"
 
 @pytest.mark.asyncio
-async def test_run_async_legacy_fails_in_async_context():
-    """Test that run_async_legacy correctly fails when called from async context"""
+async def test_run_async_legacy_works_in_async_context():
+    """Test that run_async_legacy works correctly when called from async context using ThreadPoolExecutor"""
     async def test_coro():
         return "test_result"
     
-    # Create coroutine and ensure it fails with helpful error message
-    coro = test_coro()
-    try:
-        with pytest.raises(RuntimeError, match="run_async_legacy cannot be called from an async context"):
-            run_async_legacy(coro)
-    finally:
-        # Close the coroutine to avoid warnings
-        coro.close()
+    # Should work correctly in async context using ThreadPoolExecutor
+    result = run_async_legacy(test_coro())
+    assert result == "test_result"
 
 def test_run_async_legacy_error_propagation():
     """Test run_async_legacy properly propagates errors"""
