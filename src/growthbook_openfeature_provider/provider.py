@@ -1,11 +1,10 @@
 from typing import List, Optional, Union, Dict, Any, Callable
 from dataclasses import dataclass, field
 import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import logging
 import traceback
 
-# OpenFeature imports - based on openfeature-sdk>=0.7.4
+# OpenFeature imports - based on openfeature-sdk>=0.8.1
 from openfeature.provider import AbstractProvider, Metadata
 from openfeature.evaluation_context import EvaluationContext
 from openfeature.hook import Hook
@@ -45,47 +44,31 @@ class GrowthBookProviderOptions:
     on_experiment_viewed: Optional[Callable[[Experiment], None]] = None
     sticky_bucket_service: Optional[AbstractStickyBucketService] = None
 
-def run_async(coro):
+def run_async_legacy(coro):
     """
     Run a coroutine in the current event loop or create a new one if needed.
+    Legacy run_async function for backward compatibility.
     
-    This function handles several edge cases:
-    1. No event loop exists
-    2. Event loop exists but can't be accessed
-    3. Event loop is running (nested case)
-    4. Coroutine raises an exception
-    5. Cleanup of newly created event loops
+    This function is kept for existing sync contexts that still need it,
+    but the preferred approach is to use the native async methods when possible.
     
-    Performance optimizations:
-    1. Avoids unnecessary task creation in nested async contexts
-    2. Caches loop detection result
-    3. Minimizes exception handling overhead
-    
-    Args:
-        coro: The coroutine to run
-        
-    Returns:
-        The result of the coroutine
-        
-    Raises:
-        RuntimeError: If no event loop can be found or created
-        Exception: Any exception raised by the coroutine
+    In async contexts, this will fail with a clear error message directing
+    users to use the native async methods instead.
     """
-    # Quick check for running loop first (most common case in async contexts)
+    # Check if we're in an async context
     try:
-        loop = asyncio.get_running_loop()
-
-        # We're in an async context - run in separate thread
-        def run_in_thread():
-            return asyncio.run(coro)
-        
-        # Execute in thread pool
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(run_in_thread)
-            return future.result() # blocks until the result is ready - Fix to support backwards compatibility.
+        asyncio.get_running_loop()
     except RuntimeError:
-        # Not in async context, proceed with sync handling
+        # No running event loop - we're in a sync context, proceed with sync handling
         pass
+    else:
+        # We're in an async context - this should not happen with proper async usage
+        logger.warning("run_async_legacy called from async context - consider using native async methods")
+        raise RuntimeError(
+            "run_async_legacy cannot be called from an async context. "
+            "Use the native async methods instead: "
+            "resolve_boolean_details_async(), resolve_string_details_async(), etc."
+        )
 
     # Sync context handling
     try:
@@ -169,7 +152,7 @@ class GrowthBookProvider(AbstractProvider):
 
     def initialize_sync(self):
         """Synchronous initialization for non-async contexts"""
-        return run_async(self.initialize())
+        return run_async_legacy(self.initialize())
 
     def get_metadata(self) -> Metadata:
         """Return provider metadata"""
@@ -300,7 +283,7 @@ class GrowthBookProvider(AbstractProvider):
         value_converter: Callable[[Any], Any] = lambda x: x
     ) -> FlagResolutionDetails:
         """Synchronous version of flag evaluation for OpenFeature interface."""
-        return run_async(self._process_flag_evaluation_async(
+        return run_async_legacy(self._process_flag_evaluation_async(
             flag_key=flag_key,
             default_value=default_value,
             evaluation_context=evaluation_context,
@@ -313,13 +296,17 @@ class GrowthBookProvider(AbstractProvider):
         default_value: bool,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[bool]:
-        """Resolve boolean feature flags"""
-        return self._process_flag_evaluation(
-            flag_key=flag_key,
-            default_value=default_value,
-            evaluation_context=evaluation_context,
-            value_converter=bool
-        )
+        """Synchronous boolean flag evaluation"""
+        return self._process_flag_evaluation(flag_key, default_value, evaluation_context, bool)
+
+    async def resolve_boolean_details_async(
+        self,
+        flag_key: str,
+        default_value: bool,
+        evaluation_context: Optional[EvaluationContext] = None,
+    ) -> FlagResolutionDetails[bool]:
+        """Asynchronous boolean flag evaluation"""
+        return await self._process_flag_evaluation_async(flag_key, default_value, evaluation_context, bool)
 
     def resolve_string_details(
         self,
@@ -327,13 +314,17 @@ class GrowthBookProvider(AbstractProvider):
         default_value: str,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[str]:
-        """Resolve string feature flags"""
-        return self._process_flag_evaluation(
-            flag_key=flag_key,
-            default_value=default_value,
-            evaluation_context=evaluation_context,
-            value_converter=str
-        )
+        """Synchronous string flag evaluation"""
+        return self._process_flag_evaluation(flag_key, default_value, evaluation_context, str)
+
+    async def resolve_string_details_async(
+        self,
+        flag_key: str,
+        default_value: str,
+        evaluation_context: Optional[EvaluationContext] = None,
+    ) -> FlagResolutionDetails[str]:
+        """Asynchronous string flag evaluation"""
+        return await self._process_flag_evaluation_async(flag_key, default_value, evaluation_context, str)
 
     def resolve_integer_details(
         self,
@@ -341,13 +332,17 @@ class GrowthBookProvider(AbstractProvider):
         default_value: int,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[int]:
-        """Resolve integer feature flags"""
-        return self._process_flag_evaluation(
-            flag_key=flag_key,
-            default_value=default_value,
-            evaluation_context=evaluation_context,
-            value_converter=int
-        )
+        """Synchronous integer flag evaluation"""
+        return self._process_flag_evaluation(flag_key, default_value, evaluation_context, int)
+
+    async def resolve_integer_details_async(
+        self,
+        flag_key: str,
+        default_value: int,
+        evaluation_context: Optional[EvaluationContext] = None,
+    ) -> FlagResolutionDetails[int]:
+        """Asynchronous integer flag evaluation"""
+        return await self._process_flag_evaluation_async(flag_key, default_value, evaluation_context, int)
 
     def resolve_float_details(
         self,
@@ -355,13 +350,17 @@ class GrowthBookProvider(AbstractProvider):
         default_value: float,
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[float]:
-        """Resolve float feature flags"""
-        return self._process_flag_evaluation(
-            flag_key=flag_key,
-            default_value=default_value,
-            evaluation_context=evaluation_context,
-            value_converter=float
-        )
+        """Synchronous float flag evaluation"""
+        return self._process_flag_evaluation(flag_key, default_value, evaluation_context, float)
+
+    async def resolve_float_details_async(
+        self,
+        flag_key: str,
+        default_value: float,
+        evaluation_context: Optional[EvaluationContext] = None,
+    ) -> FlagResolutionDetails[float]:
+        """Asynchronous float flag evaluation"""
+        return await self._process_flag_evaluation_async(flag_key, default_value, evaluation_context, float)
 
     def resolve_object_details(
         self,
@@ -369,15 +368,20 @@ class GrowthBookProvider(AbstractProvider):
         default_value: Union[dict, list],
         evaluation_context: Optional[EvaluationContext] = None,
     ) -> FlagResolutionDetails[Union[dict, list]]:
-        """Resolve object feature flags"""
-        return self._process_flag_evaluation(
-            flag_key=flag_key,
-            default_value=default_value,
-            evaluation_context=evaluation_context
-        )
+        """Synchronous object flag evaluation"""
+        return self._process_flag_evaluation(flag_key, default_value, evaluation_context, type(default_value))
+
+    async def resolve_object_details_async(
+        self,
+        flag_key: str,
+        default_value: Union[dict, list],
+        evaluation_context: Optional[EvaluationContext] = None,
+    ) -> FlagResolutionDetails[Union[dict, list]]:
+        """Asynchronous object flag evaluation"""
+        return await self._process_flag_evaluation_async(flag_key, default_value, evaluation_context, type(default_value))
 
     async def close(self):
-        """Clean up resources when provider is no longer needed"""
+        """Close the provider and cleanup resources"""
         if self.client:
             await self.client.close()
             self.client = None
