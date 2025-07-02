@@ -12,7 +12,7 @@ This example demonstrates how to:
 """
 
 import asyncio
-from openfeature.api import OpenFeatureAPI
+from openfeature import api
 from openfeature.evaluation_context import EvaluationContext
 from growthbook_openfeature_provider import GrowthBookProvider, GrowthBookProviderOptions
 
@@ -33,10 +33,10 @@ def sync_example():
     provider.initialize_sync()
     
     # Register with OpenFeature
-    OpenFeatureAPI.set_provider(provider)
+    api.set_provider(provider)
     
     # Get a client
-    client = OpenFeatureAPI.get_client("my-app")
+    client = api.get_client("my-app")
     
     # Create an evaluation context with targeting information
     context = EvaluationContext(
@@ -84,10 +84,10 @@ async def async_example():
     await provider.initialize()
     
     # Register with OpenFeature
-    OpenFeatureAPI.set_provider(provider)
+    api.set_provider(provider)
     
     # Get a client
-    client = OpenFeatureAPI.get_client("my-async-app")
+    client = api.get_client("my-async-app")
     
     # Create an evaluation context with targeting information
     context = EvaluationContext(
@@ -135,8 +135,8 @@ def error_handling_example():
         print(f"Provider initialization failed (expected): {e}")
     
     # Register with OpenFeature anyway to demonstrate error handling in flag evaluation
-    OpenFeatureAPI.set_provider(provider)
-    client = OpenFeatureAPI.get_client("error-app")
+    api.set_provider(provider)
+    client = api.get_client("error-app")
     
     # Create a context
     context = EvaluationContext(targeting_key="user-789")
