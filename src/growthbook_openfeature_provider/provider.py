@@ -55,20 +55,23 @@ def run_async_legacy(coro):
     In async contexts, this will fail with a clear error message directing
     users to use the native async methods instead.
     """
-    # Check if we're in an async context
+    # Quick check for running loop first (most common case in async contexts)
     try:
         asyncio.get_running_loop()
+        # We're in an async context - run in separate thread
+        logger.debug("run_async_legacy called from async context - using ThreadPoolExecutor")
+        
+        def run_in_thread():
+            return asyncio.run(coro)
+        
+        # Execute in thread pool
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_in_thread)
+            return future.result()  # blocks until the result is ready - Fix to support backwards compatibility
     except RuntimeError:
-        # No running event loop - we're in a sync context, proceed with sync handling
+        # Not in async context, proceed with sync handling
         pass
-    else:
-        # We're in an async context - this should not happen with proper async usage
-        logger.warning("run_async_legacy called from async context - consider using native async methods")
-        raise RuntimeError(
-            "run_async_legacy cannot be called from an async context. "
-            "Use the native async methods instead: "
-            "resolve_boolean_details_async(), resolve_string_details_async(), etc."
-        )
 
     # Sync context handling
     try:
