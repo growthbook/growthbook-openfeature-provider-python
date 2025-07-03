@@ -1,6 +1,13 @@
 # CHANGELOG
 
 
+## [0.0.6](https://github.com/growthbook/growthbook-openfeature-provider-python/compare/0.0.5...0.0.6) (2025-07-03)
+
+
+### Bug Fixes
+
+* adds support for async provider functions ([45c4ff7](https://github.com/growthbook/growthbook-openfeature-provider-python/commit/45c4ff71f9723be6cc236c9f625f042f4359c7e6))
+
 ## [0.0.5](https://github.com/growthbook/growthbook-openfeature-provider-python/compare/0.0.4...0.0.5) (2025-07-01)
 
 
