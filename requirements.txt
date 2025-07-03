@@ -1,1 +1,1 @@
-openfeature-sdk>=0.7.4
+openfeature-sdk>=0.8.1
